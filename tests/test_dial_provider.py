@@ -17,7 +17,7 @@ class TestDIALProvider:
         """Test provider initialization with custom host."""
         provider = DIALModelProvider("test-key")
         assert provider._dial_api_key == "test-key"  # Check internal API key storage
-        assert provider.api_key == "dummy"  # OpenAI client uses dummy key
+        assert provider.api_key == "placeholder-not-used"  # OpenAI client uses placeholder, auth header removed by hook
         assert provider.base_url == "https://test.dialx.ai/openai"
         assert provider.get_provider_type() == ProviderType.DIAL
 
@@ -26,7 +26,7 @@ class TestDIALProvider:
         """Test provider initialization with default host."""
         provider = DIALModelProvider("test-key")
         assert provider._dial_api_key == "test-key"  # Check internal API key storage
-        assert provider.api_key == "dummy"  # OpenAI client uses dummy key
+        assert provider.api_key == "placeholder-not-used"  # OpenAI client uses placeholder, auth header removed by hook
         assert provider.base_url == "https://core.dialx.ai/openai"
 
     def test_initialization_host_normalization(self):
@@ -202,8 +202,8 @@ class TestDIALProvider:
     def test_configurable_api_version(self):
         """Test that API version can be configured via environment variable."""
         provider = DIALModelProvider("test-key")
-        # Check that the custom API version is used in headers
-        assert provider.DEFAULT_HEADERS["api-version"] == "2024-12-01"
+        # Check that the custom API version is stored
+        assert provider.api_version == "2024-12-01"
 
     def test_default_api_version(self):
         """Test that default API version is used when not configured."""
@@ -215,7 +215,7 @@ class TestDIALProvider:
 
             provider = DIALModelProvider("test-key")
             # Check that the default API version is used
-            assert provider.DEFAULT_HEADERS["api-version"] == "2025-01-01-preview"
+            assert provider.api_version == "2024-12-01-preview"
             # Check that Api-Key header is set
             assert provider.DEFAULT_HEADERS["Api-Key"] == "test-key"
 

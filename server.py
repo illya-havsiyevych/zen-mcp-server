@@ -387,15 +387,19 @@ def configure_providers():
     # Register cleanup function for providers
     def cleanup_providers():
         """Clean up all registered providers on shutdown."""
-        logger.info("Server shutting down. Closing provider resources...")
-        for provider_type in list(ModelProviderRegistry._providers.keys()):
-            try:
-                provider = ModelProviderRegistry.get_provider(provider_type)
-                if provider and hasattr(provider, "close"):
-                    provider.close()
-                    logger.info(f"Successfully closed resources for {provider_type.value} provider.")
-            except Exception as e:
-                logger.error(f"Error closing resources for {provider_type.value} provider: {e}")
+        try:
+            registry = ModelProviderRegistry()
+            if hasattr(registry, "_initialized_providers"):
+                for provider in list(registry._initialized_providers.items()):
+                    try:
+                        if provider and hasattr(provider, "close"):
+                            provider.close()
+                    except Exception:
+                        # Logger might be closed during shutdown
+                        pass
+        except Exception:
+            # Silently ignore any errors during cleanup
+            pass
 
     atexit.register(cleanup_providers)
 

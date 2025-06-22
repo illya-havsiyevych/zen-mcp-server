@@ -26,6 +26,10 @@ class DIALModelProvider(OpenAICompatibleProvider):
 
     FRIENDLY_NAME = "DIAL"
 
+    # Retry configuration for API calls
+    MAX_RETRIES = 4
+    RETRY_DELAYS = [1, 3, 5, 8]  # seconds
+
     # Supported DIAL models (these can be customized based on your DIAL deployment)
     SUPPORTED_MODELS = {
         "o3-2025-04-16": {
@@ -102,23 +106,21 @@ class DIALModelProvider(OpenAICompatibleProvider):
         kwargs["base_url"] = dial_host
 
         # Get API version from environment or use default
-        api_version = os.getenv("DIAL_API_VERSION", "2025-01-01-preview")
+        self.api_version = os.getenv("DIAL_API_VERSION", "2024-12-01-preview")
 
         # Add DIAL-specific headers
         # DIAL uses Api-Key header instead of Authorization: Bearer
         # Reference: https://dialx.ai/dial_api#section/Authorization
         self.DEFAULT_HEADERS = {
             "Api-Key": api_key,
-            "api-version": api_version,
-            "X-DIAL-Provider": "zen-mcp-server",
         }
 
         # Store the actual API key for use in Api-Key header
         self._dial_api_key = api_key
 
-        # Pass a dummy API key to OpenAI client since we're using Api-Key header
+        # Pass a placeholder API key to OpenAI client - we'll override the auth header in httpx
         # The actual authentication happens via the Api-Key header in the httpx client
-        super().__init__("dummy", **kwargs)
+        super().__init__("placeholder-not-used", **kwargs)
 
         # Cache for deployment-specific clients to avoid recreating them on each request
         self._deployment_clients = {}
@@ -127,6 +129,18 @@ class DIALModelProvider(OpenAICompatibleProvider):
 
         # Create a SINGLE shared httpx client for the provider instance
         import httpx
+
+        # Create custom event hooks to remove Authorization header
+        def remove_auth_header(request):
+            """Remove Authorization header that OpenAI client adds."""
+            # httpx headers are case-insensitive, so we need to check all variations
+            headers_to_remove = []
+            for header_name in request.headers:
+                if header_name.lower() == "authorization":
+                    headers_to_remove.append(header_name)
+
+            for header_name in headers_to_remove:
+                del request.headers[header_name]
 
         self._http_client = httpx.Client(
             timeout=self.timeout_config,
@@ -138,9 +152,10 @@ class DIALModelProvider(OpenAICompatibleProvider):
                 max_connections=10,
                 keepalive_expiry=30.0,
             ),
+            event_hooks={"request": [remove_auth_header]},
         )
 
-        logger.info(f"Initialized DIAL provider with host: {dial_host} and api-version: {api_version}")
+        logger.info(f"Initialized DIAL provider with host: {dial_host} and api-version: {self.api_version}")
 
     def get_capabilities(self, model_name: str) -> ModelCapabilities:
         """Get capabilities for a specific model.
@@ -264,11 +279,12 @@ class DIALModelProvider(OpenAICompatibleProvider):
                 deployment_url = f"{base_url}/openai/deployments/{deployment}"
 
                 # Create and cache the client, REUSING the shared http_client
-                # Use dummy API key since we're using Api-Key header in http_client
+                # Use placeholder API key - Authorization header will be removed by http_client event hook
                 self._deployment_clients[deployment] = OpenAI(
-                    api_key="dummy",
+                    api_key="placeholder-not-used",
                     base_url=deployment_url,
                     http_client=self._http_client,  # Pass the shared client with Api-Key header
+                    default_query={"api-version": self.api_version},  # Add api-version as query param
                 )
 
         return self._deployment_clients[deployment]
@@ -365,11 +381,9 @@ class DIALModelProvider(OpenAICompatibleProvider):
         deployment_client = self._get_deployment_client(resolved_model)
 
         # Retry logic with progressive delays
-        max_retries = 4
-        retry_delays = [1, 3, 5, 8]
         last_exception = None
 
-        for attempt in range(max_retries):
+        for attempt in range(self.MAX_RETRIES):
             try:
                 # Generate completion using deployment-specific client
                 response = deployment_client.chat.completions.create(**completion_params)
@@ -403,16 +417,18 @@ class DIALModelProvider(OpenAICompatibleProvider):
                     raise ValueError(f"DIAL API error for model {model_name}: {str(e)}")
 
                 # If this isn't the last attempt and error is retryable, wait and retry
-                if attempt < max_retries - 1:
-                    delay = retry_delays[attempt]
+                if attempt < self.MAX_RETRIES - 1:
+                    delay = self.RETRY_DELAYS[attempt]
                     logger.info(
-                        f"DIAL API error (attempt {attempt + 1}/{max_retries}), " f"retrying in {delay}s: {str(e)}"
+                        f"DIAL API error (attempt {attempt + 1}/{self.MAX_RETRIES}), " f"retrying in {delay}s: {str(e)}"
                     )
                     time.sleep(delay)
                     continue
 
         # All retries exhausted
-        raise ValueError(f"DIAL API error for model {model_name} after {max_retries} attempts: {str(last_exception)}")
+        raise ValueError(
+            f"DIAL API error for model {model_name} after {self.MAX_RETRIES} attempts: {str(last_exception)}"
+        )
 
     def _supports_vision(self, model_name: str) -> bool:
         """Check if the model supports vision (image processing).
@@ -501,7 +517,7 @@ class DIALModelProvider(OpenAICompatibleProvider):
 
         # Also close the client created by the superclass (OpenAICompatibleProvider)
         # as it holds its own httpx.Client instance that is not used by DIAL's generate_content
-        if hasattr(self, "client") and hasattr(self.client, "close"):
+        if hasattr(self, "client") and self.client and hasattr(self.client, "close"):
             try:
                 self.client.close()
                 logger.debug("Closed superclass's OpenAI client")
