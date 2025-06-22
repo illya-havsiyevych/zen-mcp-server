@@ -39,6 +39,8 @@ class TestDIALProvider:
         provider = DIALModelProvider("test-key", base_url="https://custom.dialx.ai/openai")
         assert provider.base_url == "https://custom.dialx.ai/openai"
 
+    @patch.dict(os.environ, {"DIAL_ALLOWED_MODELS": ""}, clear=False)
+    @patch("utils.model_restrictions._restriction_service", None)
     def test_model_validation(self):
         """Test model name validation."""
         provider = DIALModelProvider("test-key")
@@ -73,6 +75,8 @@ class TestDIALProvider:
             == "anthropic.claude-opus-4-20250514-v1:0"
         )
 
+    @patch.dict(os.environ, {"DIAL_ALLOWED_MODELS": ""}, clear=False)
+    @patch("utils.model_restrictions._restriction_service", None)
     def test_get_capabilities(self):
         """Test getting model capabilities."""
         provider = DIALModelProvider("test-key")
@@ -111,6 +115,8 @@ class TestDIALProvider:
         assert capabilities.temperature_constraint.max_temp == 2.0
         assert capabilities.temperature_constraint.default_temp == 0.7
 
+    @patch.dict(os.environ, {"DIAL_ALLOWED_MODELS": ""}, clear=False)
+    @patch("utils.model_restrictions._restriction_service", None)
     def test_get_capabilities_invalid_model(self):
         """Test that get_capabilities raises for invalid models."""
         provider = DIALModelProvider("test-key")
@@ -131,6 +137,8 @@ class TestDIALProvider:
         with pytest.raises(ValueError, match="not allowed by restriction policy"):
             provider.get_capabilities("o3")
 
+    @patch.dict(os.environ, {"DIAL_ALLOWED_MODELS": ""}, clear=False)
+    @patch("utils.model_restrictions._restriction_service", None)
     def test_supports_vision(self):
         """Test vision support detection."""
         provider = DIALModelProvider("test-key")
@@ -212,6 +220,7 @@ class TestDIALProvider:
             assert provider.DEFAULT_HEADERS["Api-Key"] == "test-key"
 
     @patch.dict(os.environ, {"DIAL_ALLOWED_MODELS": "o3-2025-04-16,anthropic.claude-opus-4-20250514-v1:0"})
+    @patch("utils.model_restrictions._restriction_service", None)
     def test_allowed_models_restriction(self):
         """Test model allow-list functionality."""
         provider = DIALModelProvider("test-key")
